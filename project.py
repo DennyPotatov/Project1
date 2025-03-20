@@ -8,6 +8,15 @@ from torch.utils.data import DataLoader
 from torch.utils.data import random_split
 import torch.nn as nn
 from collections import Counter
+from torch.utils.data import Dataset
+import random
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import confusion_matrix, accuracy_score
+import numpy as np
+from PIL import Image
+
+
 
 device = torch.device("cuda:0")
 
@@ -31,40 +40,22 @@ print(dataset.categories)
 selected_categories = {"butterfly", "flamingo", "dolphin"}
 
 # Step 3 Load dataset ###################################################################################
-from torch.utils.data import Dataset
-
-class FilteredDataset(Dataset):
-    def __init__(self, filtered_data):
-        self.data = filtered_data
-
-    def __len__(self):
-        return len(self.data)
-
-    def __getitem__(self, idx):
-        return self.data[idx]
-    
-
 filtered_data = [(img, label) for img, label in dataset if dataset.categories[label] in selected_categories]
 
-imds = FilteredDataset(filtered_data)
-
 # Step 4 Count number of images per category ###################################################################################
-category_counts = Counter([dataset.categories[label] for _, label in imds])
+category_counts = Counter([dataset.categories[label] for _, label in filtered_data])
 print(category_counts)
 
 # Step 5 Determin the smallers amount of images per category ###################################################################################
 minSetCount = min(category_counts.values()) 
 print("Minimum number of images per category:", minSetCount)
-import random
 
 # Step 6 Adjust each category to have the same number of images ###################################################################################
 
-balanced_data = []
+balanced_dataset = []
 for category in selected_categories:
-    category_images = [(img, label) for img, label in imds if dataset.categories[label] == category]
-    balanced_data.extend(random.sample(category_images, minSetCount))
-
-balanced_dataset = FilteredDataset(balanced_data)
+    category_images = [(img, label) for img, label in filtered_data if dataset.categories[label] == category]
+    balanced_dataset.extend(random.sample(category_images, minSetCount))
 
 # Step 7 Download the pretrained network ###################################################################################
 net = models.resnet50(pretrained=True)
@@ -75,95 +66,91 @@ print(w1.shape)
 
 # Step 8 Extract the training features in CNN ###################################################################################
 
-# Get the weights of the first convolutional layer
-# w1 = net.conv1.weight.detach().cpu().numpy()
+w1 = net.conv1.weight.detach().cpu().numpy()
 
-# num_filters = w1.shape[0]
+num_filters = w1.shape[0]
 
-# kernel_size = w1.shape[2]
+kernel_size = w1.shape[2]
 
-# rows = int(np.sqrt(num_filters))
-# cols = int(np.ceil(num_filters / rows))
+rows = int(np.sqrt(num_filters))
+cols = int(np.ceil(num_filters / rows))
 
-# fig, axes = plt.subplots(rows, cols, figsize=(10, 10))
+fig, axes = plt.subplots(rows, cols, figsize=(10, 10))
 
-# for i in range(num_filters):
-#     r = i // cols
-#     c = i % cols
+for i in range(num_filters):
+    r = i // cols
+    c = i % cols
     
-#     filter_img = w1[i, :, :, :].transpose(1, 2, 0)
-#     filter_img = (filter_img - filter_img.min()) / (filter_img.max() - filter_img.min())
+    filter_img = w1[i, :, :, :].transpose(1, 2, 0)
+    filter_img = (filter_img - filter_img.min()) / (filter_img.max() - filter_img.min())
 
-#     if rows == 1 and cols == 1:
-#         axes.imshow(filter_img)
-#     elif rows == 1 or cols == 1:
-#         axes[max(r, c)].imshow(filter_img)
-#     else:
-#         axes[r, c].imshow(filter_img)
-#     axes[r, c].axis('off')
+    if rows == 1 and cols == 1:
+        axes.imshow(filter_img)
+    elif rows == 1 or cols == 1:
+        axes[max(r, c)].imshow(filter_img)
+    else:
+        axes[r, c].imshow(filter_img)
+    axes[r, c].axis('off')
 
-# plt.tight_layout()
-# plt.savefig("resnet50_conv1_filters.png") 
+plt.tight_layout()
+plt.savefig("resnet50_conv1_filters.png") 
 
 
-# Step 9 Evaluate Classification ###################################################################################
+# Step 9 Evaluate Classification (Wasn't specified what classifier to use)###################################################################################
 
-# train_size = int(0.8 * len(dataset))
-# test_size = len(dataset) - train_size
-# train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
+train_size = int(0.8 * len(dataset))
+test_size = len(dataset) - train_size
+train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
 
-# # Load pre-trained ResNet50 model and move it to the GPU
-# resnet = models.resnet50(pretrained=True).to(device)
-# resnet.eval()  # Set to evaluation mode
 
-# # Function to extract features
-# def extract_features(dataset, model, device):
-#     features = []
-#     with torch.no_grad():  # Disable gradient calculation
-#         for image, _ in dataset:
-#             image = image.unsqueeze(0).to(device)  # Add batch dimension and move to GPU
-#             output = model.conv1(image)  # Pass through the first conv layer
-#             output = model.bn1(output)
-#             output = model.relu(output)
-#             output = model.maxpool(output)
+resnet = models.resnet50(pretrained=True).to(device)
+resnet.eval() 
+
+
+def extract_features(dataset, model, device):
+    features = []
+    with torch.no_grad():  
+        for image, _ in dataset:
+            image = image.unsqueeze(0).to(device)  
+            output = model.conv1(image) 
+            output = model.bn1(output)
+            output = model.relu(output)
+            output = model.maxpool(output)
             
-#             output = model.layer1(output)
-#             output = model.layer2(output)
-#             output = model.layer3(output)
-#             output = model.layer4(output)
+            output = model.layer1(output)
+            output = model.layer2(output)
+            output = model.layer3(output)
+            output = model.layer4(output)
             
-#             output = model.avgpool(output)  # Average pooling
-#             output = torch.flatten(output, 1)  # Flatten
-#             features.append(output.cpu().numpy())  # Move back to CPU and convert to NumPy
-#     return np.concatenate(features, axis=0)  # Concatenate features
+            output = model.avgpool(output) 
+            output = torch.flatten(output, 1) 
+            features.append(output.cpu().numpy()) 
+    return np.concatenate(features, axis=0) 
 
-# # Extract features from train and test sets
-# train_features = extract_features(train_dataset, resnet, device)
-# test_features = extract_features(test_dataset, resnet, device)
 
-# # Visualize features
-# fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+train_features = extract_features(train_dataset, resnet, device)
+test_features = extract_features(test_dataset, resnet, device)
 
-# # Plot train features
-# for i in range(train_features.shape[0]):
-#     ax1.plot(train_features[i, :])
 
-# ax1.set_title("Train Features")
-# ax1.set_xlabel("Feature Index")
-# ax1.set_ylabel("Feature Value")
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
 
-# # Plot test features
-# for i in range(test_features.shape[0]):
-#     ax2.plot(test_features[i, :])
+for i in range(train_features.shape[0]):
+    ax1.plot(train_features[i, :])
 
-# ax2.set_title("Test Features")
-# ax2.set_xlabel("Feature Index")
-# ax2.set_ylabel("Feature Value")
+ax1.set_title("Train Features")
+ax1.set_xlabel("Feature Index")
+ax1.set_ylabel("Feature Value")
 
-# plt.tight_layout()
+for i in range(test_features.shape[0]):
+    ax2.plot(test_features[i, :])
 
-# # Save the figure as a PNG file
-# plt.savefig("train_test_features_gpu.png")
+ax2.set_title("Test Features")
+ax2.set_xlabel("Feature Index")
+ax2.set_ylabel("Feature Value")
+
+plt.tight_layout()
+
+plt.savefig("train_test_features_gpu.png")
 
 dataloader = DataLoader(balanced_dataset, batch_size=32, shuffle=True)
 
@@ -185,11 +172,6 @@ labels = torch.cat(labels)
 
 print("Extracted Feature Shape:", features.shape)  
 
-from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import confusion_matrix, accuracy_score
-import numpy as np
-
 X = features.numpy()
 y = labels.numpy()
 
@@ -209,11 +191,9 @@ print("Confusion Matrix:\n", confMat)
 per_class_accuracy = np.diag(confMat) / np.sum(confMat, axis=1)
 mean_accuracy = np.mean(per_class_accuracy)
 
-print("Mean Accuracy (per-class average):", mean_accuracy)
+print("Mean Accuracy:", mean_accuracy)
 
 # Step 10 Apply the trained classifier to one test image ###################################################################################
-
-from PIL import Image
 
 img_path = "image_0011.jpg"
 image = Image.open(img_path)
@@ -230,7 +210,6 @@ with torch.no_grad():
 feature_np = extracted_feature.numpy()
 
 predicted_label = clf.predict(feature_np)[0] 
-
 
 predicted_class = dataset.categories[predicted_label]
 
